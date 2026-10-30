@@ -54,6 +54,7 @@ from vllm.tool_parsers.streaming import (
     extract_required_tool_call_streaming,
 )
 from vllm.tool_parsers.structural_tag_registry import (
+    allow_in_free_text,
     get_structural_tag_tools,
     limit_to_single_tool_call,
     resolve_tool_strictness,
@@ -587,6 +588,14 @@ class DelegatingParser(Parser):
 
         if single_call:
             limit_to_single_tool_call(tools_structural_tag)
+        if self._reasoning_parser is not None:
+            allow_in_free_text(
+                tools_structural_tag,
+                (
+                    self._reasoning_parser.reasoning_start_str,
+                    self._reasoning_parser.reasoning_end_str,
+                ),
+            )
         structural_tag = tools_structural_tag
         if output_format is not None:
             structural_tag = StructuralTag(
