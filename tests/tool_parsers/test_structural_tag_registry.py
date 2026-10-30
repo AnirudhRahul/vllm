@@ -175,6 +175,42 @@ def test_deepseek_v41_constrains_parameters_after_reasoning(
     assert _is_grammar_accept_string(grammar, "Hello") == (choice == "auto")
 
 
+@pytest.mark.parametrize("reasoning_parser", [None, "deepseek_v41"])
+def test_strict_tools_allow_reasoning_end_in_content(
+    monkeypatch, sample_tools_strict, reasoning_parser
+):
+    """A reasoning parser owns ``</think>``, so the strict grammar must not ban it.
+
+    The model can emit ``</think>`` while quoting it mid-thought. Reasoning ends
+    there and the grammar starts; if it bans ``</think>``, the model cannot close
+    its thought before the tool call and repeats itself until ``max_tokens``.
+    """
+    monkeypatch.setattr(envs, "VLLM_ENFORCE_STRICT_TOOL_CALLING", True)
+    parser_cls = ParserManager.get_parser(
+        tool_parser_name="deepseek_v41",
+        reasoning_parser_name=reasoning_parser,
+        enable_auto_tools=True,
+    )
+    assert parser_cls is not None
+    request = ChatCompletionRequest(
+        messages=[], model="m", tools=sample_tools_strict, tool_choice="auto"
+    )
+    out = parser_cls(MagicMock(), tools=sample_tools_strict).adjust_request(request)
+    assert out.structured_outputs is not None
+    grammar = Grammar.from_structural_tag(out.structured_outputs.structural_tag)
+    call = (
+        '\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name="get_weather">\n'
+        '<｜DSML｜ parameter name="city" string="true">Paris</｜DSML｜ parameter>\n'
+        "</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+    )
+    assert _is_grammar_accept_string(grammar, "Quoted `x` done.</think>" + call) == (
+        reasoning_parser is not None
+    )
+    assert not _is_grammar_accept_string(
+        grammar, "done.</think>" + call.replace('name="city"', 'name="town"')
+    )
+
+
 def test_deepseek_v41_non_strict_parallel_calls_keep_typed_dsml(sample_tools):
     sample_tools[0].function.strict = False
     tag = get_model_structural_tag(

@@ -3,7 +3,7 @@
 
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Literal, TypeAlias
 
 from openai.types.responses import CustomTool, FunctionTool, ToolChoiceCustom
@@ -275,6 +275,35 @@ def limit_to_single_tool_call(tag: StructuralTag) -> StructuralTag:
                 visit(item)
 
     visit(tag.format)
+    return tag
+
+
+def allow_in_free_text(
+    tag: StructuralTag, strings: Iterable[str | None]
+) -> StructuralTag:
+    """Stop every free-text section of ``tag`` from excluding ``strings``, in place.
+
+    xgrammar's builtin tags forbid ``<think>`` and ``</think>`` in free text. When
+    a reasoning parser owns the reasoning section, the grammar only starts after
+    the first reasoning end token, so a model that emitted that token mid-thought
+    can never emit the real one and repeats itself until ``max_tokens``.
+    """
+    allowed = {s for s in strings if s}
+
+    def visit(node: Any) -> None:
+        if isinstance(node, BaseModel):
+            for field in ("excludes", "exclude_tokens"):
+                values = getattr(node, field, None)
+                if isinstance(values, list):
+                    setattr(node, field, [v for v in values if v not in allowed])
+            for name in type(node).model_fields:
+                visit(getattr(node, name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+
+    if allowed:
+        visit(tag.format)
     return tag
 
 
